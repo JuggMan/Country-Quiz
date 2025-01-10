@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>All Countries - Circle Markers (Inline)</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+  <style>
+    /* Page Layout */
+    body {
+      margin: 0;
+      padding: 0;
+      text-align: center;
+      font-family: Arial, sans-serif;
+    }
+    header {
+      background: #f4f4f4;
+      padding: 10px;
+    }
+    .counters {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+    }
+    .counters span {
+      font-weight: bold;
+    }
+
+    /* The Map */
+    #map {
+      width: 90%;
+      height: 80vh;
+      margin: 20px auto;
+    }
+
+    /* Popup for guess */
+    #guess-popup {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 2px solid #444;
+      padding: 20px;
+      z-index: 9999;
+      display: none;
+      width: 300px;
+    }
+    #guess-popup h3 {
+      margin-top: 0;
+    }
+    #guess-popup input {
+      width: 90%;
+      padding: 8px;
+      font-size: 14px;
+    }
+
+    /* Autocomplete */
+    #autocomplete-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border: 1px solid #ccc;
+      max-height: 150px;
+      overflow-y: auto;
+      width: 90%;
+      background: #fff;
+      position: relative;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    #autocomplete-list li {
+      padding: 5px;
+      cursor: pointer;
+    }
+    #autocomplete-list li:hover {
+      background: #ddd;
+    }
+
+    /* Buttons in popup */
+    #guess-popup button {
+      margin: 10px 5px 0 5px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Guess the Country</h1>
+    <div class="counters">
+      <div>Correct: <span id="correctCount">0</span></div>
+      <div>Wrong: <span id="wrongCount">0</span></div>
+    </div>
+  </header>
+
+  <!-- Map Container -->
+  <div id="map"></div>
+
+  <!-- Popup for guesses -->
+  <div id="guess-popup">
+    <h3>Guess the Country</h3>
+    <input type="text" id="countryGuess" placeholder="Type a country name..." />
+    <ul id="autocomplete-list"></ul>
+    <br />
+    <button id="submitGuess" type="button">Submit</button>
+    <button id="cancelGuess" type="button">Cancel</button>
+    <!-- Reveal Button -->
+    <button id="revealGuess" type="button">Reveal</button>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <script>
+    /**************************************************************
+     * 1. Initialize Leaflet map with a no-labels tile layer
+     **************************************************************/
+     const map = L.map("map", { attributionControl: false }).setView([20, 0], 2);
+    L.tileLayer(
+      "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+    ).addTo(map);
+
+    /**************************************************************
+     * 2. Global counters & sets
+     **************************************************************/
+    let correctCount = 0;
+    let wrongCount = 0;
+    const correctCountries = new Set(); // track which countries have been guessed
+
+    // track revealed countries so they can't be guessed later
+    const revealedCountries = new Set();
+
+    /**************************************************************
+     * 3. DOM references
+     **************************************************************/
+    const popup = document.getElementById("guess-popup");
+    const input = document.getElementById("countryGuess");
+    const autocompleteList = document.getElementById("autocomplete-list");
+    const submitBtn = document.getElementById("submitGuess");
+    const cancelBtn = document.getElementById("cancelGuess");
+    const correctCountSpan = document.getElementById("correctCount");
+    const wrongCountSpan = document.getElementById("wrongCount");
+    // reveal button
+    const revealBtn = document.getElementById("revealGuess");
+
+    let currentCountryCode = null;
+    let currentCountryName = null;
+
+    /**************************************************************
+     * 4. Data structures for all countries
+     **************************************************************/
+    const countryMap = {};    // code -> name
+    const countryNames = [];  // array of official names, for autocomplete
+
+    /**************************************************************
+     * 5. Full Country Centroids (Inline)
+     **************************************************************/
+    const allCountryCentroids = {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "AFG", "name": "Afghanistan" },
+          "geometry": { "type": "Point", "coordinates": [ 66.00473366, 33.83523073 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "AGO", "name": "Angola" },
+          "geometry": { "type": "Point", "coordinates": [ 17.5691241, -12.29337165 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ALB", "name": "Albania" },
+          "geometry": { "type": "Point", "coordinates": [ 20.04983317, 41.14244989 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ARE", "name": "United Arab Emirates" },
+          "geometry": { "type": "Point", "coordinates": [ 54.30022154, 23.90500351 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ARG", "name": "Argentina" },
+          "geometry": { "type": "Point", "coordinates": [ -64.96728195, -34.16828491 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ARM", "name": "Armenia" },
+          "geometry": { "type": "Point", "coordinates": [ 44.88972491, 40.29312939 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "AUS", "name": "Australia" },
+          "geometry": { "type": "Point", "coordinates": [ 133.06684856, -25.36388216 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "AUT", "name": "Austria" },
+          "geometry": { "type": "Point", "coordinates": [ 13.33333333, 47.33333333 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "AZE", "name": "Azerbaijan" },
+          "geometry": { "type": "Point", "coordinates": [ 47.57592574, 40.28827256 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BDI", "name": "Burundi" },
+          "geometry": { "type": "Point", "coordinates": [ 29.91888601, -3.36343574 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BEL", "name": "Belgium" },
+          "geometry": { "type": "Point", "coordinates": [ 4.64134647, 50.63981518 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BEN", "name": "Benin" },
+          "geometry": { "type": "Point", "coordinates": [ 2.31583446, 9.64266629 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BFA", "name": "Burkina Faso" },
+          "geometry": { "type": "Point", "coordinates": [ -1.6880314, 12.26803748 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BGD", "name": "Bangladesh" },
+          "geometry": { "type": "Point", "coordinates": [ 90.20107156, 23.86914333 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BGR", "name": "Bulgaria" },
+          "geometry": { "type": "Point", "coordinates": [ 25.23653194, 42.76622732 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BHS", "name": "Bahamas" },
+          "geometry": { "type": "Point", "coordinates": [ -77.33908464, 24.77365464 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BIH", "name": "Bosnia and Herzegovina" },
+          "geometry": { "type": "Point", "coordinates": [ 17.78933894, 44.17700803 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BLR", "name": "Belarus" },
+          "geometry": { "type": "Point", "coordinates": [ 28.03224739, 53.51003795 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BLZ", "name": "Belize" },
+          "geometry": { "type": "Point", "coordinates": [ -88.70603173, 17.19304016 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BOL", "name": "Bolivia" },
+          "geometry": { "type": "Point", "coordinates": [ -64.68538612, -16.71379855 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BRA", "name": "Brazil" },
+          "geometry": { "type": "Point", "coordinates": [ -52.97311706, -10.78778427 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BRN", "name": "Brunei" },
+          "geometry": { "type": "Point", "coordinates": [ 114.7188199, 4.51572976 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BTN", "name": "Bhutan" },
+          "geometry": { "type": "Point", "coordinates": [ 90.43360194, 27.41494402 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "BWA", "name": "Botswana" },
+          "geometry": { "type": "Point", "coordinates": [ 24.25858308, -22.1637592 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CAF", "name": "Central African Republic" },
+          "geometry": { "type": "Point", "coordinates": [ 20.45590005, 6.56823296 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CAN", "name": "Canada" },
+          "geometry": { "type": "Point", "coordinates": [ -98.308997, 61.331859 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CHE", "name": "Switzerland" },
+          "geometry": { "type": "Point", "coordinates": [ 8.23197361, 46.7985624 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CHL", "name": "Chile" },
+          "geometry": { "type": "Point", "coordinates": [ -71.31876968, -37.72265693 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CHN", "name": "China" },
+          "geometry": { "type": "Point", "coordinates": [ 103.8194992, 35.86166 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CIV", "name": "Côte d'Ivoire" },
+          "geometry": { "type": "Point", "coordinates": [ -5.531097, 7.670352 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CMR", "name": "Cameroon" },
+          "geometry": { "type": "Point", "coordinates": [ 12.73630728, 5.71577363 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "COD", "name": "Democratic Republic of the Congo" },
+          "geometry": { "type": "Point", "coordinates": [ 23.82226327, -2.98143431 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "COG", "name": "Republic of the Congo" },
+          "geometry": { "type": "Point", "coordinates": [ 15.25074652, -0.83787438 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "COI", "name": "Cayman Islands" },
+          "geometry": { "type": "Point", "coordinates": [ -81.101832, 19.338972 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "COL", "name": "Colombia" },
+          "geometry": { "type": "Point", "coordinates": [ -73.087749, 4.570868 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CRI", "name": "Costa Rica" },
+          "geometry": { "type": "Point", "coordinates": [ -83.753428, 9.748917 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CUB", "name": "Cuba" },
+          "geometry": { "type": "Point", "coordinates": [ -79.555948, 21.521757 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CYP", "name": "Cyprus" },
+          "geometry": { "type": "Point", "coordinates": [ 33.429859, 35.126413 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "CZE", "name": "Czech Republic" },
+          "geometry": { "type": "Point", "coordinates": [ 15.384208, 49.817492 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "DEU", "name": "Germany" },
+          "geometry": { "type": "Point", "coordinates": [ 10.451526, 51.165691 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "DJI", "name": "Djibouti" },
+          "geometry": { "type": "Point", "coordinates": [ 42.590275, 11.825138 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "DNK", "name": "Denmark" },
+          "geometry": { "type": "Point", "coordinates": [ 9.501785, 56.26392 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "DOM", "name": "Dominican Republic" },
+          "geometry": { "type": "Point", "coordinates": [ -70.162651, 18.735693 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "DZA", "name": "Algeria" },
+          "geometry": { "type": "Point", "coordinates": [ 2.617754, 28.158938 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ECU", "name": "Ecuador" },
+          "geometry": { "type": "Point", "coordinates": [ -78.183406, -1.831239 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "EGY", "name": "Egypt" },
+          "geometry": { "type": "Point", "coordinates": [ 30.802498, 26.820553 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ERI", "name": "Eritrea" },
+          "geometry": { "type": "Point", "coordinates": [ 39.782334, 15.179384 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ESP", "name": "Spain" },
+          "geometry": { "type": "Point", "coordinates": [ -3.74922, 40.463667 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "EST", "name": "Estonia" },
+          "geometry": { "type": "Point", "coordinates": [ 25.013607, 58.595272 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ETH", "name": "Ethiopia" },
+          "geometry": { "type": "Point", "coordinates": [ 40.489673, 9.145 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "FIN", "name": "Finland" },
+          "geometry": { "type": "Point", "coordinates": [ 25.748151, 61.92411 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "FJI", "name": "Fiji" },
+          "geometry": { "type": "Point", "coordinates": [ 179.414413, -16.578193 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "FRA", "name": "France" },
+          "geometry": { "type": "Point", "coordinates": [ 2.213749, 46.227638 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "FSM", "name": "Micronesia" },
+          "geometry": { "type": "Point", "coordinates": [ 150.550812, 7.425554 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GAB", "name": "Gabon" },
+          "geometry": { "type": "Point", "coordinates": [ 11.609444, -0.803689 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GBR", "name": "United Kingdom" },
+          "geometry": { "type": "Point", "coordinates": [ -3.435973, 55.378051 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GEO", "name": "Georgia" },
+          "geometry": { "type": "Point", "coordinates": [ 43.356892, 42.315407 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GHA", "name": "Ghana" },
+          "geometry": { "type": "Point", "coordinates": [ -1.023194, 7.946527 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GIN", "name": "Guinea" },
+          "geometry": { "type": "Point", "coordinates": [ -9.696645, 9.945587 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GMB", "name": "Gambia" },
+          "geometry": { "type": "Point", "coordinates": [ -15.310139, 13.443182 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GNB", "name": "Guinea-Bissau" },
+          "geometry": { "type": "Point", "coordinates": [ -15.180413, 11.803749 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GNQ", "name": "Equatorial Guinea" },
+          "geometry": { "type": "Point", "coordinates": [ 10.267895, 1.650801 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GRC", "name": "Greece" },
+          "geometry": { "type": "Point", "coordinates": [ 21.824312, 39.074208 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GRN", "name": "Greenland" },
+          "geometry": { "type": "Point", "coordinates": [ -42, 71 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GTM", "name": "Guatemala" },
+          "geometry": { "type": "Point", "coordinates": [ -90.230759, 15.783471 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "GUY", "name": "Guyana" },
+          "geometry": { "type": "Point", "coordinates": [ -58.93018, 4.860416 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "HND", "name": "Honduras" },
+          "geometry": { "type": "Point", "coordinates": [ -86.241905, 15.199999 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "HRV", "name": "Croatia" },
+          "geometry": { "type": "Point", "coordinates": [ 16.413228, 45.1 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "HTI", "name": "Haiti" },
+          "geometry": { "type": "Point", "coordinates": [ -72.285215, 18.971187 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "HUN", "name": "Hungary" },
+          "geometry": { "type": "Point", "coordinates": [ 19.503304, 47.162494 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "IDN", "name": "Indonesia" },
+          "geometry": { "type": "Point", "coordinates": [ 113.921327, -0.789275 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "IND", "name": "India" },
+          "geometry": { "type": "Point", "coordinates": [ 78.96288, 20.593684 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "IRL", "name": "Ireland" },
+          "geometry": { "type": "Point", "coordinates": [ -8.24389, 53.41291 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "IRN", "name": "Iran" },
+          "geometry": { "type": "Point", "coordinates": [ 53.688046, 32.427908 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "IRQ", "name": "Iraq" },
+          "geometry": { "type": "Point", "coordinates": [ 43.679291, 33.223191 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ISL", "name": "Iceland" },
+          "geometry": { "type": "Point", "coordinates": [ -19.020835, 64.963051 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ISR", "name": "Israel" },
+          "geometry": { "type": "Point", "coordinates": [ 34.851612, 31.046051 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ITA", "name": "Italy" },
+          "geometry": { "type": "Point", "coordinates": [ 12.56738, 41.87194 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "JAM", "name": "Jamaica" },
+          "geometry": { "type": "Point", "coordinates": [ -77.297508, 18.109581 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "JOR", "name": "Jordan" },
+          "geometry": { "type": "Point", "coordinates": [ 36.238414, 30.585164 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "JPN", "name": "Japan" },
+          "geometry": { "type": "Point", "coordinates": [ 138.252924, 36.204824 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "KAZ", "name": "Kazakhstan" },
+          "geometry": { "type": "Point", "coordinates": [ 66.923684, 48.019573 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "KEN", "name": "Kenya" },
+          "geometry": { "type": "Point", "coordinates": [ 37.906193, -0.023559 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "KGZ", "name": "Kyrgyzstan" },
+          "geometry": { "type": "Point", "coordinates": [ 74.766098, 41.20438 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "KHM", "name": "Cambodia" },
+          "geometry": { "type": "Point", "coordinates": [ 104.990963, 12.565679 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "KOR", "name": "South Korea" },
+          "geometry": { "type": "Point", "coordinates": [ 127.766922, 35.907757 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "KWT", "name": "Kuwait" },
+          "geometry": { "type": "Point", "coordinates": [ 47.481766, 29.31166 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LAO", "name": "Laos" },
+          "geometry": { "type": "Point", "coordinates": [ 102.495496, 19.85627 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LBN", "name": "Lebanon" },
+          "geometry": { "type": "Point", "coordinates": [ 35.862285, 33.854721 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LBR", "name": "Liberia" },
+          "geometry": { "type": "Point", "coordinates": [ -9.429499, 6.428055 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LBY", "name": "Libya" },
+          "geometry": { "type": "Point", "coordinates": [ 17.228331, 26.3351 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LKA", "name": "Sri Lanka" },
+          "geometry": { "type": "Point", "coordinates": [ 80.771797, 7.873054 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LSO", "name": "Lesotho" },
+          "geometry": { "type": "Point", "coordinates": [ 28.233608, -29.609988 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LTU", "name": "Lithuania" },
+          "geometry": { "type": "Point", "coordinates": [ 23.881275, 55.169438 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LUX", "name": "Luxembourg" },
+          "geometry": { "type": "Point", "coordinates": [ 6.129583, 49.815273 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "LVA", "name": "Latvia" },
+          "geometry": { "type": "Point", "coordinates": [ 24.603189, 56.879635 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MAR", "name": "Morocco" },
+          "geometry": { "type": "Point", "coordinates": [ -7.09262, 31.791702 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MDA", "name": "Moldova" },
+          "geometry": { "type": "Point", "coordinates": [ 28.369885, 47.411631 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MDG", "name": "Madagascar" },
+          "geometry": { "type": "Point", "coordinates": [ 46.869107, -18.766947 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MDV", "name": "Maldives" },
+          "geometry": { "type": "Point", "coordinates": [ 73.22068, 3.202778 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MEX", "name": "Mexico" },
+          "geometry": { "type": "Point", "coordinates": [ -102.5528, 23.634501 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MKD", "name": "North Macedonia" },
+          "geometry": { "type": "Point", "coordinates": [ 21.745275, 41.608635 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MLI", "name": "Mali" },
+          "geometry": { "type": "Point", "coordinates": [ -3.996166, 17.570692 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MMR", "name": "Myanmar" },
+          "geometry": { "type": "Point", "coordinates": [ 95.956223, 21.913965 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MNE", "name": "Montenegro" },
+          "geometry": { "type": "Point", "coordinates": [ 19.37439, 42.708678 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MNG", "name": "Mongolia" },
+          "geometry": { "type": "Point", "coordinates": [ 103.846656, 46.862496 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MOZ", "name": "Mozambique" },
+          "geometry": { "type": "Point", "coordinates": [ 35.529562, -18.665695 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MRT", "name": "Mauritania" },
+          "geometry": { "type": "Point", "coordinates": [ -10.940835, 21.00789 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MWI", "name": "Malawi" },
+          "geometry": { "type": "Point", "coordinates": [ 34.301525, -13.254308 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "MYS", "name": "Malaysia" },
+          "geometry": { "type": "Point", "coordinates": [ 101.975766, 4.210484 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NAM", "name": "Namibia" },
+          "geometry": { "type": "Point", "coordinates": [ 18.49041, -22.95764 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NCL", "name": "New Caledonia" },
+          "geometry": { "type": "Point", "coordinates": [ 165.618042, -20.904305 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NER", "name": "Niger" },
+          "geometry": { "type": "Point", "coordinates": [ 8.081666, 17.607789 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NGA", "name": "Nigeria" },
+          "geometry": { "type": "Point", "coordinates": [ 8.675277, 9.081999 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NIC", "name": "Nicaragua" },
+          "geometry": { "type": "Point", "coordinates": [ -85.207229, 12.865416 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NLD", "name": "Netherlands" },
+          "geometry": { "type": "Point", "coordinates": [ 5.291266, 52.132633 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NOR", "name": "Norway" },
+          "geometry": { "type": "Point", "coordinates": [ 8.468946, 60.472024 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NPL", "name": "Nepal" },
+          "geometry": { "type": "Point", "coordinates": [ 84.124008, 28.394857 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "NZL", "name": "New Zealand" },
+          "geometry": { "type": "Point", "coordinates": [ 174.885971, -40.900557 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "OMN", "name": "Oman" },
+          "geometry": { "type": "Point", "coordinates": [ 55.923255, 21.512583 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PAK", "name": "Pakistan" },
+          "geometry": { "type": "Point", "coordinates": [ 69.345116, 30.375321 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PAN", "name": "Panama" },
+          "geometry": { "type": "Point", "coordinates": [ -80.782127, 8.537981 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PER", "name": "Peru" },
+          "geometry": { "type": "Point", "coordinates": [ -75.015152, -9.189967 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PHL", "name": "Philippines" },
+          "geometry": { "type": "Point", "coordinates": [ 121.774017, 12.879721 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PNG", "name": "Papua New Guinea" },
+          "geometry": { "type": "Point", "coordinates": [ 143.95555, -6.314993 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "POL", "name": "Poland" },
+          "geometry": { "type": "Point", "coordinates": [ 19.145136, 51.919438 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PRI", "name": "Puerto Rico" },
+          "geometry": { "type": "Point", "coordinates": [ -66.590149, 18.220833 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PRK", "name": "North Korea" },
+          "geometry": { "type": "Point", "coordinates": [ 127.510093, 40.339852 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PRT", "name": "Portugal" },
+          "geometry": { "type": "Point", "coordinates": [ -8.224454, 39.399872 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "PRY", "name": "Paraguay" },
+          "geometry": { "type": "Point", "coordinates": [ -58.443832, -23.442503 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "QAT", "name": "Qatar" },
+          "geometry": { "type": "Point", "coordinates": [ 51.183884, 25.354826 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ROU", "name": "Romania" },
+          "geometry": { "type": "Point", "coordinates": [ 24.96676, 45.943161 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "RUS", "name": "Russia" },
+          "geometry": { "type": "Point", "coordinates": [ 105.318756, 61.52401 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "RWA", "name": "Rwanda" },
+          "geometry": { "type": "Point", "coordinates": [ 29.873888, -1.940278 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SAU", "name": "Saudi Arabia" },
+          "geometry": { "type": "Point", "coordinates": [ 45.079162, 23.885942 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SDN", "name": "Sudan" },
+          "geometry": { "type": "Point", "coordinates": [ 30.217636, 12.862807 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SDS", "name": "South Sudan" },
+          "geometry": { "type": "Point", "coordinates": [ 30.058414, 7.309078 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SEN", "name": "Senegal" },
+          "geometry": { "type": "Point", "coordinates": [ -14.452362, 14.497401 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SLB", "name": "Solomon Islands" },
+          "geometry": { "type": "Point", "coordinates": [ 160.156194, -8.874217 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SLE", "name": "Sierra Leone" },
+          "geometry": { "type": "Point", "coordinates": [ -11.779889, 8.460555 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SLV", "name": "El Salvador" },
+          "geometry": { "type": "Point", "coordinates": [ -88.89653, 13.794185 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SOM", "name": "Somalia" },
+          "geometry": { "type": "Point", "coordinates": [ 46.199616, 5.152149 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SRB", "name": "Serbia" },
+          "geometry": { "type": "Point", "coordinates": [ 21.005859, 44.016521 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SSD", "name": "South Sudan" },
+          "geometry": { "type": "Point", "coordinates": [ 30.0, 7.5 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SUR", "name": "Suriname" },
+          "geometry": { "type": "Point", "coordinates": [ -56.027351, 3.919305 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SVK", "name": "Slovakia" },
+          "geometry": { "type": "Point", "coordinates": [ 19.699024, 48.669026 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SVN", "name": "Slovenia" },
+          "geometry": { "type": "Point", "coordinates": [ 14.995463, 46.151241 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SWE", "name": "Sweden" },
+          "geometry": { "type": "Point", "coordinates": [ 18.643501, 60.128161 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SWZ", "name": "Eswatini" },
+          "geometry": { "type": "Point", "coordinates": [ 31.465866, -26.522503 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "SYR", "name": "Syria" },
+          "geometry": { "type": "Point", "coordinates": [ 38.996815, 34.802075 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TCD", "name": "Chad" },
+          "geometry": { "type": "Point", "coordinates": [ 18.732207, 15.454166 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TGO", "name": "Togo" },
+          "geometry": { "type": "Point", "coordinates": [ 0.824782, 8.619543 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "THA", "name": "Thailand" },
+          "geometry": { "type": "Point", "coordinates": [ 100.992541, 15.870032 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TJK", "name": "Tajikistan" },
+          "geometry": { "type": "Point", "coordinates": [ 71.276093, 38.861034 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TKM", "name": "Turkmenistan" },
+          "geometry": { "type": "Point", "coordinates": [ 59.556278, 38.969719 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TLS", "name": "Timor-Leste" },
+          "geometry": { "type": "Point", "coordinates": [ 125.727539, -8.874217 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TTO", "name": "Trinidad and Tobago" },
+          "geometry": { "type": "Point", "coordinates": [ -61.222503, 10.691803 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TUN", "name": "Tunisia" },
+          "geometry": { "type": "Point", "coordinates": [ 9.537499, 33.886917 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TUR", "name": "Turkey" },
+          "geometry": { "type": "Point", "coordinates": [ 35.243322, 38.963745 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TWN", "name": "Taiwan" },
+          "geometry": { "type": "Point", "coordinates": [ 120.960515, 23.69781 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "TZA", "name": "Tanzania" },
+          "geometry": { "type": "Point", "coordinates": [ 34.888822, -6.369028 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "UGA", "name": "Uganda" },
+          "geometry": { "type": "Point", "coordinates": [ 32.290275, 1.373333 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "UKR", "name": "Ukraine" },
+          "geometry": { "type": "Point", "coordinates": [ 31.16558, 48.379433 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "URY", "name": "Uruguay" },
+          "geometry": { "type": "Point", "coordinates": [ -55.765835, -32.522779 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "USA", "name": "United States of America" },
+          "geometry": { "type": "Point", "coordinates": [ -99.901813, 39.828175 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "UZB", "name": "Uzbekistan" },
+          "geometry": { "type": "Point", "coordinates": [ 64.585262, 41.377491 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "VEN", "name": "Venezuela" },
+          "geometry": { "type": "Point", "coordinates": [ -66.58973, 6.42375 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "VNM", "name": "Vietnam" },
+          "geometry": { "type": "Point", "coordinates": [ 108.277199, 14.058324 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "YEM", "name": "Yemen" },
+          "geometry": { "type": "Point", "coordinates": [ 48.516388, 15.552727 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ZAF", "name": "South Africa" },
+          "geometry": { "type": "Point", "coordinates": [ 22.937506, -30.559482 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ZMB", "name": "Zambia" },
+          "geometry": { "type": "Point", "coordinates": [ 27.849332, -13.133897 ] }
+        },
+        {
+          "type": "Feature",
+          "properties": { "iso_a3": "ZWE", "name": "Zimbabwe" },
+          "geometry": { "type": "Point", "coordinates": [ 29.154857, -19.015438 ] }
+        }
+      ]
+    };
+
+    /**************************************************************
+     * 6. Create a GeoJSON layer from our big inline dataset
+     *    Each country is rendered as a circle marker
+     **************************************************************/
+    const geoJsonLayer = L.geoJson(allCountryCentroids, {
+      pointToLayer: (feature, latlng) => {
+        return L.circleMarker(latlng, {
+          radius: 6,
+          fillColor: "#ccc",
+          color: "#000",
+          weight: 1,
+          fillOpacity: 0.7,
+        });
+      },
+      onEachFeature: (feature, layer) => {
+        const code = feature.properties.iso_a3;
+        const name = feature.properties.name;
+        if (!code || !name) return;
+
+        // Fill data structures
+        countryMap[code] = name;
+        if (!countryNames.includes(name)) {
+          countryNames.push(name);
+        }
+
+        // Click on circle
+        layer.on("click", () => {
+          // If correct or revealed, show message & return
+          if (correctCountries.has(code)) {
+            alert(`You've already guessed ${name}!`);
+            return;
+          }
+          if (revealedCountries.has(code)) {
+            alert(`This is ${name} (revealed).`);
+            return;
+          }
+
+          currentCountryCode = code;
+          currentCountryName = name;
+
+          input.value = "";
+          autocompleteList.innerHTML = "";
+          popup.style.display = "block";
+          input.focus();
+        });
+      },
+    }).addTo(map);
+
+    /**************************************************************
+     * 7. Autocomplete logic
+     **************************************************************/
+    input.addEventListener("input", () => {
+      const value = input.value.trim().toLowerCase();
+      autocompleteList.innerHTML = "";
+      if (!value) return;
+
+      // Filter names
+      const matches = countryNames.filter((c) =>
+        c.toLowerCase().startsWith(value)
+      );
+
+      // Build suggestion list
+      matches.forEach((country) => {
+        const li = document.createElement("li");
+        li.textContent = country;
+        li.addEventListener("click", () => {
+          input.value = country;
+          autocompleteList.innerHTML = "";
+        });
+        autocompleteList.appendChild(li);
+      });
+    });
+
+    /**************************************************************
+     * 8. Submit guess
+     **************************************************************/
+    submitBtn.addEventListener("click", () => {
+      if (!currentCountryCode || !currentCountryName) return;
+
+      const guessedName = input.value.trim();
+      if (guessedName.toLowerCase() === currentCountryName.toLowerCase()) {
+        // CORRECT
+        correctCountries.add(currentCountryCode);
+        correctCount++;
+        correctCountSpan.textContent = correctCount;
+
+        // Color circle green
+        geoJsonLayer.eachLayer((layer) => {
+          if (
+            layer.feature &&
+            layer.feature.properties.iso_a3 === currentCountryCode
+          ) {
+            layer.setStyle({
+              fillColor: "green",
+              fillOpacity: 0.7,
+              color: "#000",
+            });
+          }
+        });
+      } else {
+        // WRONG
+        wrongCount++;
+        wrongCountSpan.textContent = wrongCount;
+        alert(`Wrong guess!`);
+      }
+
+      closePopup();
+    });
+
+    /**************************************************************
+     * 9. Cancel guess
+     **************************************************************/
+    cancelBtn.addEventListener("click", closePopup);
+
+    // Reveal logic
+    revealBtn.addEventListener("click", () => {
+      if (!currentCountryCode || !currentCountryName) return;
+
+      // The popup says the name of the country
+      input.value = currentCountryName;
+
+      // Turn the bubble red
+      geoJsonLayer.eachLayer((layer) => {
+        if (
+          layer.feature &&
+          layer.feature.properties.iso_a3 === currentCountryCode
+        ) {
+          layer.setStyle({
+            fillColor: "red",
+            fillOpacity: 0.7,
+            color: "#000",
+          });
+        }
+      });
+
+      // Mark as revealed so it can't be guessed again
+      revealedCountries.add(currentCountryCode);
+
+      // >>> NEW: Disable the Submit button until popup is closed
+      submitBtn.disabled = true;
+    });
+
+    function closePopup() {
+      popup.style.display = "none";
+      input.value = "";
+      autocompleteList.innerHTML = "";
+      currentCountryCode = null;
+      currentCountryName = null;
+
+      // >>> NEW: Re-enable Submit for future countries
+      submitBtn.disabled = false;
+    }
+  </script>
+</body>
+</html>
